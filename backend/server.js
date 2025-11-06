@@ -1,17 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { testConnection } = require('./config/database');
-const errorHandler = require('./middleware/errorHandler');
 
-// Load environment variables
+// Load environment variables FIRST
 dotenv.config();
 
-// Import routes
-const authRoutes = require('./routes/auth');
-const issueRoutes = require('./routes/issues');
-
-// Initialize express app
 const app = express();
 
 // Middleware
@@ -22,60 +15,49 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - ${new Date().toISOString()}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-// Test database connection
-testConnection();
+// ✅ ROUTES - THESE ARE CRITICAL
+app.use('/api/auth', require('./routes/authRoutes'));      // ← Must have this
+app.use('/api/issues', require('./routes/issueRoutes'));   // ← Must have this
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/issues', issueRoutes);
-
-// Health check route
+// Health check
 app.get('/api/health', (req, res) => {
-  res.json({
+  res.json({ 
     success: true,
+    status: 'OK', 
     message: 'Server is running',
     timestamp: new Date().toISOString()
   });
 });
 
-// 404 handler
-app.use((req, res) => {
+// 404 Handler
+app.use((req, res, next) => {
   res.status(404).json({
     success: false,
-    message: 'Route not found'
+    message: `Route ${req.originalUrl} not found`
   });
 });
 
-// Error handler middleware (must be last)
-app.use(errorHandler);
+// Error Handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  
+  res.status(err.statusCode || 500).json({
+    success: false,
+    message: err.message || 'Something went wrong!',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  });
+});
 
-// Start server
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║                                                           ║
-║   🏛️  Municipality Issue Log System - Backend Server      ║
-║                                                           ║
-║   Environment: ${process.env.NODE_ENV || 'development'}   ║
-║   Port:        ${PORT}                                    ║
-║   API URL:     http://localhost:${PORT}/api               ║
-║                                                           ║
-║   Status:      ✅ Running                                 ║
-║                                                           ║
-╚═══════════════════════════════════════════════════════════╝
-  `);
+  console.log(`🚀 Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-  // Close server & exit process
-  process.exit(1);
-});
+module.exports = app;

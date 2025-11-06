@@ -1,505 +1,505 @@
-const { promisePool } = require('../config/database');
-const { uploadImage, deleteImage } = require('../config/imagekit');
+const db = require('../config/database');
+const fs = require('fs');
+const path = require('path');
 
-// @desc    Get all issues with filters
-// @route   GET /api/issues
-// @access  Private
-exports.getIssues = async (req, res, next) => {
+/**
+ * Create a new issue
+ * POST /api/issues
+ */
+exports.createIssue = async (req, res) => {
   try {
-    const { status, category, priority, sortBy = 'latest' } = req.query;
-    
+    const { title, description, category_id, priority, attachment_ids } = req.body;
+    const userId = req.user.userId;
+
+    console.log('📍 Creating issue for user:', userId);
+
+    // Validate required fields
+    if (!title || !description || !category_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title, description, and category are required'
+      });
+    }
+
+    // Insert issue
+    const issueQuery = `
+      INSERT INTO issues (citizen_id, title, description, category_id, priority, status, created_by, created_at)
+      VALUES ((SELECT id FROM citizens WHERE user_id = ?), ?, ?, ?, ?, ?, ?, NOW())
+    `;
+
+    return new Promise((resolve, reject) => {
+      db.query(
+        issueQuery,
+        [userId, title, description, category_id, priority || 'medium', 'open', userId],
+        (error, results) => {
+          if (error) {
+            console.error('Issue creation error:', error);
+            reject(error);
+          } else {
+            const issueId = results.insertId;
+            console.log('✅ Issue created with ID:', issueId);
+            
+            res.status(201).json({
+              success: true,
+              message: 'Issue created successfully',
+              data: {
+                issueId,
+                title,
+                description,
+                status: 'open',
+                createdAt: new Date()
+              }
+            });
+            resolve();
+          }
+        }
+      );
+    });
+  } catch (error) {
+    console.error('Create issue error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creating issue',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get citizen's own issues
+ * GET /api/issues/my-issues
+ */
+exports.getMyCitizenIssues = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { status, page = 1, limit = 10 } = req.query;
+
+    console.log('📍 Fetching issues for citizen user:', userId);
+
+    const offset = (page - 1) * limit;
+
     let query = `
       SELECT 
-        i.*,
-        u.name as citizen_name,
-        u.email as citizen_email,
-        o.name as assigned_official_name
+        i.id, 
+        i.title, 
+        i.description, 
+        i.category_id, 
+        ic.name as category_name,
+        i.priority, 
+        i.status, 
+        i.created_at,
+        COUNT(ia.id) as attachment_count
       FROM issues i
-      LEFT JOIN users u ON i.citizen_id = u.id
-      LEFT JOIN users o ON i.assigned_to = o.id
-      WHERE 1=1
+      LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN issue_attachments ia ON i.id = ia.issue_id
+      WHERE i.created_by = ?
     `;
-    
-    const params = [];
-    
-    // Filter by citizen for citizens role
-    if (req.user.role === 'citizen') {
-      query += ' AND i.citizen_id = ?';
-      params.push(req.user.id);
-    }
-    
-    // Filter by status
+
+    const params = [userId];
+
     if (status) {
       query += ' AND i.status = ?';
       params.push(status);
     }
-    
-    // Filter by category
-    if (category) {
-      query += ' AND i.category = ?';
-      params.push(category);
-    }
-    
-    // Filter by priority
-    if (priority) {
-      query += ' AND i.priority = ?';
-      params.push(priority);
-    }
-    
-    // Sorting
-    switch (sortBy) {
-      case 'oldest':
-        query += ' ORDER BY i.created_at ASC';
-        break;
-      case 'priority':
-        query += ' ORDER BY FIELD(i.priority, "urgent", "high", "medium", "low")';
-        break;
-      case 'status':
-        query += ' ORDER BY FIELD(i.status, "pending", "assigned", "in_progress", "resolved", "closed")';
-        break;
-      default: // latest
-        query += ' ORDER BY i.created_at DESC';
-    }
-    
-    const [issues] = await promisePool.query(query, params);
-    
-    res.json({
-      success: true,
-      count: issues.length,
-      issues
+
+    query += ' GROUP BY i.id ORDER BY i.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+
+    return new Promise((resolve, reject) => {
+      db.query(query, params, (error, results) => {
+        if (error) {
+          console.error('Fetch citizen issues error:', error);
+          reject(error);
+        } else {
+          console.log('✅ Fetched', results.length, 'issues');
+          
+          res.json({
+            success: true,
+            message: 'Issues retrieved successfully',
+            data: results,
+            pagination: {
+              page,
+              limit,
+              total: results.length
+            }
+          });
+          resolve();
+        }
+      });
     });
   } catch (error) {
-    next(error);
+    console.error('Get citizen issues error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching issues',
+      error: error.message
+    });
   }
 };
 
-// @desc    Get single issue
-// @route   GET /api/issues/:id
-// @access  Private
-exports.getIssue = async (req, res, next) => {
+/**
+ * Get official's assigned issues
+ * GET /api/issues/official
+ */
+exports.getOfficialIssues = async (req, res) => {
   try {
-    const [issues] = await promisePool.query(
-      `SELECT 
-        i.*,
+    const userId = req.user.userId;
+    const { status, page = 1, limit = 10 } = req.query;
+
+    console.log('📍 Fetching issues for official user:', userId);
+
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT 
+        i.id, 
+        i.title, 
+        i.description, 
+        i.category_id, 
+        ic.name as category_name,
+        i.priority, 
+        i.status, 
+        i.created_at,
+        c.id as citizen_id,
         u.name as citizen_name,
-        u.email as citizen_email,
-        u.phone as citizen_phone,
-        o.name as assigned_official_name,
-        o.department as assigned_official_department
+        COUNT(ia.id) as attachment_count
       FROM issues i
-      LEFT JOIN users u ON i.citizen_id = u.id
-      LEFT JOIN users o ON i.assigned_to = o.id
-      WHERE i.id = ?`,
-      [req.params.id]
-    );
-    
-    if (issues.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Issue not found'
-      });
+      LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN citizens c ON i.citizen_id = c.id
+      LEFT JOIN users u ON c.user_id = u.id
+      LEFT JOIN issue_attachments ia ON i.id = ia.issue_id
+      WHERE i.assigned_to = ?
+    `;
+
+    const params = [userId];
+
+    if (status) {
+      query += ' AND i.status = ?';
+      params.push(status);
     }
-    
-    const issue = issues[0];
-    
-    // Check authorization - citizens can only view their own issues
-    if (req.user.role === 'citizen' && issue.citizen_id !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to view this issue'
+
+    query += ' GROUP BY i.id ORDER BY i.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), offset);
+
+    return new Promise((resolve, reject) => {
+      db.query(query, params, (error, results) => {
+        if (error) {
+          console.error('Fetch official issues error:', error);
+          reject(error);
+        } else {
+          console.log('✅ Fetched', results.length, 'issues for official');
+          
+          res.json({
+            success: true,
+            message: 'Issues retrieved successfully',
+            data: results,
+            pagination: {
+              page,
+              limit,
+              total: results.length
+            }
+          });
+          resolve();
+        }
       });
-    }
-    
-    res.json({
-      success: true,
-      issue
     });
   } catch (error) {
-    next(error);
+    console.error('Get official issues error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching issues',
+      error: error.message
+    });
   }
 };
 
-// @desc    Create new issue
-// @route   POST /api/issues
-// @access  Private (Citizens)
-exports.createIssue = async (req, res, next) => {
+/**
+ * Get issue details by ID
+ * GET /api/issues/:id
+ */
+exports.getIssueDetails = async (req, res) => {
   try {
-    const {
-      title,
-      description,
-      category,
-      priority = 'medium',
-      location_address,
-      landmark,
-      ward_number,
-      before_images
-    } = req.body;
-    
-    // Validation
-    if (!title || !description || !category || !location_address) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide all required fields'
+    const { id } = req.params;
+
+    console.log('📍 Fetching issue details for ID:', id);
+
+    const issueQuery = `
+      SELECT 
+        i.*, 
+        ic.name as category_name,
+        c.id as citizen_id,
+        u.name as citizen_name,
+        u.phone as citizen_phone,
+        u.address as citizen_address
+      FROM issues i
+      LEFT JOIN issue_categories ic ON i.category_id = ic.id
+      LEFT JOIN citizens c ON i.citizen_id = c.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE i.id = ?
+    `;
+
+    return new Promise((resolve, reject) => {
+      db.query(issueQuery, [id], (error, results) => {
+        if (error) {
+          console.error('Fetch issue details error:', error);
+          reject(error);
+        } else if (results.length === 0) {
+          res.status(404).json({
+            success: false,
+            message: 'Issue not found'
+          });
+          resolve();
+        } else {
+          const issue = results[0];
+          
+          // Get attachments
+          const attachmentQuery = 'SELECT * FROM issue_attachments WHERE issue_id = ?';
+          db.query(attachmentQuery, [id], (attachError, attachments) => {
+            if (attachError) {
+              console.error('Fetch attachments error:', attachError);
+            }
+
+            console.log('✅ Issue details retrieved');
+            
+            res.json({
+              success: true,
+              message: 'Issue details retrieved successfully',
+              data: {
+                ...issue,
+                attachments: attachments || []
+              }
+            });
+            resolve();
+          });
+        }
       });
-    }
-    
-    // Insert issue
-    const [result] = await promisePool.query(
-      `INSERT INTO issues 
-      (title, description, category, priority, location_address, landmark, ward_number, before_images, citizen_id) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        title,
-        description,
-        category,
-        priority,
-        location_address,
-        landmark,
-        ward_number,
-        JSON.stringify(before_images || []),
-        req.user.id
-      ]
-    );
-    
-    // Get created issue
-    const [issues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [result.insertId]
-    );
-    
-    res.status(201).json({
-      success: true,
-      message: 'Issue created successfully',
-      issue: issues[0]
     });
   } catch (error) {
-    next(error);
+    console.error('Get issue details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching issue details',
+      error: error.message
+    });
   }
 };
 
-// @desc    Upload images for issue
-// @route   POST /api/issues/upload-images
-// @access  Private
-exports.uploadImages = async (req, res, next) => {
+/**
+ * Update issue status
+ * PUT /api/issues/:id/status
+ */
+exports.updateIssueStatus = async (req, res) => {
   try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No images provided'
-      });
-    }
-    
-    const uploadPromises = req.files.map(file => uploadImage(file, 'issues'));
-    const uploadedImages = await Promise.all(uploadPromises);
-    
-    res.json({
-      success: true,
-      images: uploadedImages
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+    const { id } = req.params;
+    const { status, remarks } = req.body;
+    const userId = req.user.userId;
 
-// @desc    Update issue
-// @route   PUT /api/issues/:id
-// @access  Private
-exports.updateIssue = async (req, res, next) => {
-  try {
-    // Get existing issue
-    const [issues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    if (issues.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Issue not found'
-      });
-    }
-    
-    const issue = issues[0];
-    
-    // Check authorization
-    if (req.user.role === 'citizen' && issue.citizen_id !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to update this issue'
-      });
-    }
-    
-    const {
-      title,
-      description,
-      category,
-      priority,
-      location_address,
-      landmark,
-      ward_number
-    } = req.body;
-    
-    const fieldsToUpdate = {};
-    if (title) fieldsToUpdate.title = title;
-    if (description) fieldsToUpdate.description = description;
-    if (category) fieldsToUpdate.category = category;
-    if (priority) fieldsToUpdate.priority = priority;
-    if (location_address) fieldsToUpdate.location_address = location_address;
-    if (landmark !== undefined) fieldsToUpdate.landmark = landmark;
-    if (ward_number !== undefined) fieldsToUpdate.ward_number = ward_number;
-    
-    if (Object.keys(fieldsToUpdate).length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No fields to update'
-      });
-    }
-    
-    const setClause = Object.keys(fieldsToUpdate).map(key => `${key} = ?`).join(', ');
-    const values = [...Object.values(fieldsToUpdate), req.params.id];
-    
-    await promisePool.query(
-      `UPDATE issues SET ${setClause} WHERE id = ?`,
-      values
-    );
-    
-    // Get updated issue
-    const [updatedIssues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    res.json({
-      success: true,
-      message: 'Issue updated successfully',
-      issue: updatedIssues[0]
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+    console.log('📍 Updating issue', id, 'status to:', status);
 
-// @desc    Update issue status (Officials only)
-// @route   PUT /api/issues/:id/status
-// @access  Private (Officials)
-exports.updateIssueStatus = async (req, res, next) => {
-  try {
-    const { status, resolution_notes } = req.body;
-    
     if (!status) {
       return res.status(400).json({
         success: false,
         message: 'Status is required'
       });
     }
-    
-    // Get existing issue
-    const [issues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    if (issues.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Issue not found'
+
+    const updateQuery = `
+      UPDATE issues 
+      SET status = ?, remarks = ?, modified_by = ?, modified_at = NOW()
+      WHERE id = ?
+    `;
+
+    return new Promise((resolve, reject) => {
+      db.query(updateQuery, [status, remarks || null, userId, id], (error, results) => {
+        if (error) {
+          console.error('Update issue status error:', error);
+          reject(error);
+        } else if (results.affectedRows === 0) {
+          res.status(404).json({
+            success: false,
+            message: 'Issue not found'
+          });
+          resolve();
+        } else {
+          console.log('✅ Issue status updated');
+          
+          res.json({
+            success: true,
+            message: 'Issue status updated successfully',
+            data: {
+              issueId: id,
+              status,
+              remarks,
+              modifiedAt: new Date()
+            }
+          });
+          resolve();
+        }
       });
-    }
-    
-    const issue = issues[0];
-    const oldStatus = issue.status;
-    
-    // Update issue
-    const updateData = { status };
-    if (resolution_notes) {
-      updateData.resolution_notes = resolution_notes;
-    }
-    if (status === 'resolved') {
-      updateData.resolved_at = new Date();
-    }
-    
-    const setClause = Object.keys(updateData).map(key => `${key} = ?`).join(', ');
-    const values = [...Object.values(updateData), req.params.id];
-    
-    await promisePool.query(
-      `UPDATE issues SET ${setClause} WHERE id = ?`,
-      values
-    );
-    
-    // Log status change
-    await promisePool.query(
-      `INSERT INTO issue_updates (issue_id, updated_by, old_status, new_status, update_type, comment)
-      VALUES (?, ?, ?, ?, ?, ?)`,
-      [req.params.id, req.user.id, oldStatus, status, 'status_change', resolution_notes]
-    );
-    
-    // Get updated issue
-    const [updatedIssues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    res.json({
-      success: true,
-      message: 'Status updated successfully',
-      issue: updatedIssues[0]
     });
   } catch (error) {
-    next(error);
+    console.error('Update issue status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating issue status',
+      error: error.message
+    });
   }
 };
 
-// @desc    Assign issue to official
-// @route   PUT /api/issues/:id/assign
-// @access  Private (Officials)
-exports.assignIssue = async (req, res, next) => {
+/**
+ * Escalate issue to higher official
+ * POST /api/issues/:id/escalate
+ */
+exports.escalateIssue = async (req, res) => {
   try {
-    const { assigned_to } = req.body;
-    
-    if (!assigned_to) {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user.userId;
+
+    console.log('📍 Escalating issue', id);
+
+    if (!reason) {
       return res.status(400).json({
         success: false,
-        message: 'Official ID is required'
+        message: 'Escalation reason is required'
       });
     }
-    
-    // Verify official exists
-    const [officials] = await promisePool.query(
-      'SELECT id FROM users WHERE id = ? AND role = ?',
-      [assigned_to, 'official']
-    );
-    
-    if (officials.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Official not found'
-      });
-    }
-    
-    // Update issue
-    await promisePool.query(
-      'UPDATE issues SET assigned_to = ?, status = ? WHERE id = ?',
-      [assigned_to, 'assigned', req.params.id]
-    );
-    
-    // Log assignment
-    await promisePool.query(
-      `INSERT INTO issue_updates (issue_id, updated_by, update_type, comment)
-      VALUES (?, ?, ?, ?)`,
-      [req.params.id, req.user.id, 'assignment', `Assigned to official ID ${assigned_to}`]
-    );
 
-    // Get updated issue
-    const [updatedIssues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    res.json({
-      success: true,
-      message: 'Issue assigned successfully',
-      issue: updatedIssues[0]
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Delete issue
-// @route   DELETE /api/issues/:id
-// @access  Private (Own issues only for citizens, all for officials)
-exports.deleteIssue = async (req, res, next) => {
-  try {
-    // Get existing issue
-    const [issues] = await promisePool.query(
-      'SELECT * FROM issues WHERE id = ?',
-      [req.params.id]
-    );
-    
-    if (issues.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Issue not found'
-      });
-    }
-    
-    const issue = issues[0];
-    
-    // Check authorization
-    if (req.user.role === 'citizen' && issue.citizen_id !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to delete this issue'
-      });
-    }
-    
-    // Delete associated images from ImageKit if needed
-    // Parse and delete before_images
-    if (issue.before_images) {
-      const beforeImages = JSON.parse(issue.before_images);
-      for (const image of beforeImages) {
-        if (image.fileId) {
-          await deleteImage(image.fileId);
-        }
-      }
-    }
-    
-    // Parse and delete after_images
-    if (issue.after_images) {
-      const afterImages = JSON.parse(issue.after_images);
-      for (const image of afterImages) {
-        if (image.fileId) {
-          await deleteImage(image.fileId);
-        }
-      }
-    }
-    
-    // Delete issue (cascade will delete related records)
-    await promisePool.query('DELETE FROM issues WHERE id = ?', [req.params.id]);
-    
-    res.json({
-      success: true,
-      message: 'Issue deleted successfully'
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Get issue statistics
-// @route   GET /api/issues/stats
-// @access  Private
-exports.getIssueStats = async (req, res, next) => {
-  try {
-    let query = `
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'assigned' THEN 1 ELSE 0 END) as assigned,
-        SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
-        SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved,
-        SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed,
-        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-        SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent,
-        SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high
-      FROM issues
+    const escalateQuery = `
+      UPDATE issues 
+      SET priority = 'high', 
+          status = 'escalated',
+          remarks = ?,
+          modified_by = ?,
+          modified_at = NOW()
+      WHERE id = ?
     `;
-    
-    const params = [];
-    
-    // Filter by citizen for citizens
-    if (req.user.role === 'citizen') {
-      query += ' WHERE citizen_id = ?';
-      params.push(req.user.id);
-    }
-    
-    const [stats] = await promisePool.query(query, params);
-    
-    res.json({
-      success: true,
-      stats: stats[0]
+
+    return new Promise((resolve, reject) => {
+      db.query(escalateQuery, [reason, userId, id], (error, results) => {
+        if (error) {
+          console.error('Escalate issue error:', error);
+          reject(error);
+        } else if (results.affectedRows === 0) {
+          res.status(404).json({
+            success: false,
+            message: 'Issue not found'
+          });
+          resolve();
+        } else {
+          console.log('✅ Issue escalated');
+          
+          res.json({
+            success: true,
+            message: 'Issue escalated successfully',
+            data: {
+              issueId: id,
+              status: 'escalated',
+              priority: 'high',
+              reason,
+              escalatedAt: new Date()
+            }
+          });
+          resolve();
+        }
+      });
     });
   } catch (error) {
-    next(error);
+    console.error('Escalate issue error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error escalating issue',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get all issue categories
+ * GET /api/issues/categories
+ */
+exports.getIssueCategories = async (req, res) => {
+  try {
+    console.log('📍 Fetching issue categories');
+
+    const query = 'SELECT id, name, description FROM issue_categories WHERE active = 1 ORDER BY name';
+
+    return new Promise((resolve, reject) => {
+      db.query(query, (error, results) => {
+        if (error) {
+          console.error('Fetch categories error:', error);
+          reject(error);
+        } else {
+          console.log('✅ Fetched', results.length, 'categories');
+          
+          res.json({
+            success: true,
+            message: 'Categories retrieved successfully',
+            data: results
+          });
+          resolve();
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Get categories error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching categories',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Download attachment for an issue
+ * GET /api/issues/:id/attachment/:attachmentId
+ */
+exports.downloadAttachment = async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params;
+
+    console.log('📍 Downloading attachment:', attachmentId, 'for issue:', id);
+
+    const query = 'SELECT * FROM issue_attachments WHERE id = ? AND issue_id = ?';
+
+    return new Promise((resolve, reject) => {
+      db.query(query, [attachmentId, id], (error, results) => {
+        if (error) {
+          console.error('Fetch attachment error:', error);
+          reject(error);
+        } else if (results.length === 0) {
+          res.status(404).json({
+            success: false,
+            message: 'Attachment not found'
+          });
+          resolve();
+        } else {
+          const attachment = results[0];
+          const filePath = path.join(__dirname, '..', 'uploads', attachment.file_path);
+
+          // Check if file exists
+          if (!fs.existsSync(filePath)) {
+            return res.status(404).json({
+              success: false,
+              message: 'File not found on server'
+            });
+          }
+
+          console.log('✅ Downloading file:', filePath);
+
+          res.download(filePath, attachment.file_name);
+          resolve();
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Download attachment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error downloading attachment',
+      error: error.message
+    });
   }
 };
