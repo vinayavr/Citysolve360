@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
+import CreateIssue from './pages/CreateIssue';
 
 // Pages
 import Login from './pages/Login';
@@ -51,6 +52,15 @@ function App() {
               <IssueDetails />
             </PrivateRoute>
           } />
+
+          <Route 
+            path="/citizen/create-issue" 
+            element={
+              <PrivateRoute allowedRoles={['citizen']}>
+                <CreateIssue />
+              </PrivateRoute>
+            } 
+          />
           
           <Route path="/" element={<Navigate to="/login" replace />} />
         </Routes>

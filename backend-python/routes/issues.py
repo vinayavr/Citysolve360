@@ -1,397 +1,346 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime
-import logging
+from functools import wraps
 from config.database import db
-from middleware.auth_middleware import auth_required, citizen_required, official_required
-from utils.validators import (
-    validate_issue_title, 
-    validate_issue_description, 
-    validate_priority,
-    validate_status,
-    ValidationError
-)
+import jwt
+import os
+import logging
 
 logger = logging.getLogger(__name__)
-issues_bp = Blueprint('issues', __name__)
 
-# ============================================================================
-# GET CATEGORIES
-# ============================================================================
+issues_bp = Blueprint('issues', __name__, url_prefix='/api/issues')
+
+JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-this')
+
+def token_required(f):
+    """Decorator to verify JWT token from Authorization header"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            logger.warning('❌ [TOKEN_REQUIRED] No token provided')
+            return jsonify({'success': False, 'message': 'Token is missing'}), 401
+        
+        token = auth_header[7:]  # Remove 'Bearer ' prefix
+        try:
+            logger.info('📍 [TOKEN_REQUIRED] Verifying token...')
+            # Decode using same secret as auth.py
+            data = jwt.decode(token, os.getenv('JWT_SECRET'), algorithms=['HS256'])
+            request.user_id = data.get('userId')  # Use userId (capital U)
+            if not request.user_id:
+                logger.warning('❌ [TOKEN_REQUIRED] userId not found in token')
+                return jsonify({'success': False, 'message': 'Invalid token'}), 401
+            logger.info(f'✅ [TOKEN_REQUIRED] Token verified for user: {request.user_id}')
+        except jwt.ExpiredSignatureError:
+            logger.warning('❌ [TOKEN_REQUIRED] Token has expired')
+            return jsonify({'success': False, 'message': 'Token has expired'}), 401
+        except jwt.InvalidTokenError:
+            logger.warning('❌ [TOKEN_REQUIRED] Invalid token')
+            return jsonify({'success': False, 'message': 'Invalid token'}), 401
+        except Exception as e:
+            logger.error(f'❌ [TOKEN_REQUIRED] Token validation error: {e}')
+            return jsonify({'success': False, 'message': 'Token validation failed'}), 401
+        
+        return f(*args, **kwargs)
+    return decorated
+
 
 @issues_bp.route('/categories', methods=['GET'])
+@token_required
 def get_categories():
-    """Get all issue categories"""
+    """Fetch all issue categories"""
     try:
-        logger.info('📍 [CATEGORIES] Fetching issue categories')
-        
-        categories = db.fetch_all(
-            'SELECT id, name, description FROM issue_categories WHERE active = 1 ORDER BY name'
-        )
-        
-        logger.info(f'✅ [CATEGORIES] Fetched {len(categories)} categories')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Categories retrieved successfully',
-            'data': categories
-        }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [CATEGORIES] Error: {str(e)}')
-        return jsonify({
-            'success': False,
-            'message': 'Error fetching categories'
-        }), 500
+        logger.info('📍 [GET_CATEGORIES] Request received')
+        categories = db.fetch_all('SELECT id, name FROM issue_categories ORDER BY name ASC')
+        logger.info(f'✅ [GET_CATEGORIES] Found {len(categories)} categories')
+        return jsonify({'success': True, 'data': categories}), 200
+    except Exception as error:
+        logger.error(f'❌ [GET_CATEGORIES] Error: {error}')
+        return jsonify({'success': False, 'message': 'Error fetching categories', 'error': str(error)}), 500
 
-# ============================================================================
-# CREATE ISSUE
-# ============================================================================
 
-@issues_bp.route('/', methods=['POST'])
-@auth_required
-@citizen_required
+@issues_bp.route('/create', methods=['POST'])
+@token_required
 def create_issue():
-    """Create a new issue (citizen only)"""
+    """Create a new issue"""
     try:
         logger.info('=' * 60)
-        logger.info(f'📍 [CREATE ISSUE] Request from user: {request.user["userId"]}')
+        logger.info('📍 [CREATE_ISSUE] Request received')
+        logger.info('=' * 60)
         
-        data = request.get_json()
+        user_id = request.user_id
+        description = request.form.get('description', '').strip()
+        category_id = request.form.get('category_id')
+        files = request.files.getlist('attachments')
         
-        title = data.get('title', '').strip()
-        description = data.get('description', '').strip()
-        category_id = data.get('category_id')
-        priority = data.get('priority', 'medium').lower()
+        logger.info(f'📍 [CREATE_ISSUE] user_id={user_id}, category_id={category_id}')
         
-        logger.info(f'📍 [CREATE ISSUE] Title: {title[:50]}...')
+        # Validation
+        if not description:
+            logger.warning('❌ [CREATE_ISSUE] Description is required')
+            return jsonify({'success': False, 'message': 'Description is required'}), 400
         
-        # Validate
-        errors = []
-        try:
-            validate_issue_title(title)
-        except ValidationError as e:
-            errors.append({'field': 'title', 'message': str(e)})
-        
-        try:
-            validate_issue_description(description)
-        except ValidationError as e:
-            errors.append({'field': 'description', 'message': str(e)})
-        
-        try:
-            validate_priority(priority)
-        except ValidationError as e:
-            errors.append({'field': 'priority', 'message': str(e)})
+        if len(description) > 2000:
+            logger.warning('❌ [CREATE_ISSUE] Description exceeds 2000 characters')
+            return jsonify({'success': False, 'message': 'Description cannot exceed 2000 characters'}), 400
         
         if not category_id:
-            errors.append({'field': 'category_id', 'message': 'Category is required'})
+            logger.warning('❌ [CREATE_ISSUE] Category is required')
+            return jsonify({'success': False, 'message': 'Category is required'}), 400
         
-        if errors:
-            return jsonify({
-                'success': False,
-                'message': 'Validation failed',
-                'errors': errors
-            }), 400
-        
-        # Get citizen ID
-        citizen = db.fetch_one(
-            'SELECT id FROM citizens WHERE user_id = %s',
-            (request.user['userId'],)
-        )
-        
+        # Get citizen_id
+        logger.info('📍 [CREATE_ISSUE] Getting citizen_id...')
+        citizen = db.fetch_one('SELECT id FROM citizens WHERE user_id = %s', (user_id,))
         if not citizen:
-            return jsonify({'success': False, 'message': 'Citizen not found'}), 404
+            logger.warning(f'❌ [CREATE_ISSUE] Citizen profile not found for user {user_id}')
+            return jsonify({'success': False, 'message': 'Citizen profile not found'}), 404
         
-        # Insert issue
+        citizen_id = citizen['id']
+        logger.info(f'✅ [CREATE_ISSUE] Citizen ID: {citizen_id}')
+        
+        # Get category name
+        logger.info('📍 [CREATE_ISSUE] Getting category name...')
+        category = db.fetch_one('SELECT name FROM issue_categories WHERE id = %s', (category_id,))
+        if not category:
+            logger.warning(f'❌ [CREATE_ISSUE] Invalid category: {category_id}')
+            return jsonify({'success': False, 'message': 'Invalid category selected'}), 400
+        
+        category_name = category['name']
+        logger.info(f'✅ [CREATE_ISSUE] Category: {category_name}')
+        
+        # Create issue
+        logger.info('📍 [CREATE_ISSUE] Creating issue in database...')
         result = db.execute_query(
-            '''INSERT INTO issues (citizen_id, title, description, category_id, priority, status, created_by, created_at)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())''',
-            (citizen['id'], title, description, category_id, priority, 'open', request.user['userId'])
+            '''INSERT INTO issues 
+            (citizen_id, category, description, status, created_by, updated_by, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())''',
+            (citizen_id, category_name, description, 'created', user_id, user_id)
         )
         
         if not result:
+            logger.error('❌ [CREATE_ISSUE] Failed to create issue')
             return jsonify({'success': False, 'message': 'Error creating issue'}), 500
         
-        logger.info(f'✅ [CREATE ISSUE] Issue created with ID: {result["last_id"]}')
+        issue_id = result['last_id']
+        logger.info(f'✅ [CREATE_ISSUE] Issue created with ID: {issue_id}')
+        
+        # Handle attachments
+        if files:
+            logger.info(f'📍 [CREATE_ISSUE] Processing {len(files)} attachments...')
+            for file in files:
+                if file.filename:
+                    try:
+                        file_content = file.read()
+                        file_type = file.content_type
+                        file_name = file.filename
+                        
+                        db.execute_query(
+                            '''INSERT INTO attachments 
+                            (issue_id, filename, mimetype, data)
+                            VALUES (%s, %s, %s, %s)''',
+                            (issue_id, file_name, file_type, file_content)
+                        )
+                        logger.info(f'✅ [CREATE_ISSUE] Attachment uploaded: {file_name}')
+                    except Exception as file_error:
+                        logger.warning(f'⚠️  [CREATE_ISSUE] Error uploading {file_name}: {file_error}')
+        
+        logger.info('=' * 60)
+        logger.info('✅ [CREATE_ISSUE] SUCCESS')
+        logger.info('=' * 60)
         
         return jsonify({
             'success': True,
             'message': 'Issue created successfully',
             'data': {
-                'issueId': result['last_id'],
-                'title': title,
-                'status': 'open',
-                'createdAt': datetime.now().isoformat()
+                'id': issue_id,
+                'citizen_id': citizen_id,
+                'category': category_name,
+                'description': description,
+                'status': 'created',
+                'created_at': datetime.now().isoformat()
             }
         }), 201
-    
-    except Exception as e:
-        logger.error(f'❌ [CREATE ISSUE] Error: {str(e)}')
+        
+    except Exception as error:
+        logger.error('=' * 60)
+        logger.error(f'❌ [CREATE_ISSUE] ERROR: {error}')
+        logger.error('=' * 60)
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'message': 'Error creating issue'}), 500
+        return jsonify({'success': False, 'message': 'Error creating issue', 'error': str(error)}), 500
 
-# ============================================================================
-# GET MY ISSUES (CITIZEN)
-# ============================================================================
 
 @issues_bp.route('/my-issues', methods=['GET'])
-@auth_required
-@citizen_required
+@token_required
 def get_my_issues():
-    """Get citizen's own issues"""
+    """Get all issues for citizen"""
     try:
-        user_id = request.user['userId']
+        logger.info('📍 [GET_MY_ISSUES] Request received')
+        user_id = request.user_id
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
-        status = request.args.get('status')
-        
         offset = (page - 1) * limit
         
-        logger.info(f'📍 [MY ISSUES] Fetching issues for citizen: {user_id}')
-        
-        # Get citizen ID
-        citizen = db.fetch_one(
-            'SELECT id FROM citizens WHERE user_id = %s',
-            (user_id,)
-        )
-        
+        # Get citizen_id
+        citizen = db.fetch_one('SELECT id FROM citizens WHERE user_id = %s', (user_id,))
         if not citizen:
-            return jsonify({'success': False, 'message': 'Citizen not found'}), 404
+            logger.warning(f'❌ [GET_MY_ISSUES] Citizen not found for user {user_id}')
+            return jsonify({'success': False, 'message': 'Citizen profile not found'}), 404
         
         citizen_id = citizen['id']
         
-        query = '''
-            SELECT 
-                i.id, 
-                i.title, 
-                i.description, 
-                i.category_id, 
-                ic.name as category_name,
-                i.priority, 
-                i.status, 
-                i.created_at
-            FROM issues i
-            LEFT JOIN issue_categories ic ON i.category_id = ic.id
-            WHERE i.citizen_id = %s
-        '''
+        # Get issues
+        issues = db.fetch_all(
+            '''SELECT id, category, description, status, created_at, updated_at
+            FROM issues
+            WHERE citizen_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s OFFSET %s''',
+            (citizen_id, limit, offset)
+        )
         
-        params = [citizen_id]
+        # Get total count
+        total_result = db.fetch_one('SELECT COUNT(*) as total FROM issues WHERE citizen_id = %s', (citizen_id,))
+        total_count = total_result['total'] if total_result else 0
         
-        if status:
-            query += ' AND i.status = %s'
-            params.append(status)
-        
-        query += ' ORDER BY i.created_at DESC LIMIT %s OFFSET %s'
-        params.extend([limit, offset])
-        
-        issues = db.fetch_all(query, tuple(params))
-        
-        logger.info(f'✅ [MY ISSUES] Fetched {len(issues)} issues')
+        logger.info(f'✅ [GET_MY_ISSUES] Found {len(issues)} issues for citizen {citizen_id}')
         
         return jsonify({
             'success': True,
-            'message': 'Issues retrieved successfully',
             'data': issues,
-            'pagination': {'page': page, 'limit': limit, 'total': len(issues)}
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total_count,
+                'pages': (total_count + limit - 1) // limit
+            }
         }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [MY ISSUES] Error: {str(e)}')
-        import traceback
-        logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'message': 'Error fetching issues'}), 500
-
-# ============================================================================
-# GET OFFICIAL ISSUES
-# ============================================================================
-
-@issues_bp.route('/official', methods=['GET'])
-@auth_required
-@official_required
-def get_official_issues():
-    """Get issues assigned to official"""
-    try:
-        user_id = request.user['userId']
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
-        status = request.args.get('status')
         
-        offset = (page - 1) * limit
-        
-        logger.info(f'📍 [OFFICIAL ISSUES] Fetching issues for official: {user_id}')
-        
-        query = '''
-            SELECT 
-                i.id, 
-                i.title, 
-                i.description, 
-                i.category_id, 
-                ic.name as category_name,
-                i.priority, 
-                i.status, 
-                i.created_at,
-                c.id as citizen_id,
-                u.name as citizen_name,
-                u.email as citizen_email
-            FROM issues i
-            LEFT JOIN issue_categories ic ON i.category_id = ic.id
-            LEFT JOIN citizens c ON i.citizen_id = c.id
-            LEFT JOIN users u ON c.user_id = u.id
-            WHERE i.assigned_to = %s
-        '''
-        
-        params = [user_id]
-        
-        if status:
-            query += ' AND i.status = %s'
-            params.append(status)
-        
-        query += ' ORDER BY i.created_at DESC LIMIT %s OFFSET %s'
-        params.extend([limit, offset])
-        
-        issues = db.fetch_all(query, tuple(params))
-        
-        logger.info(f'✅ [OFFICIAL ISSUES] Fetched {len(issues)} issues')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Issues retrieved successfully',
-            'data': issues,
-            'pagination': {'page': page, 'limit': limit, 'total': len(issues)}
-        }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [OFFICIAL ISSUES] Error: {str(e)}')
-        return jsonify({'success': False, 'message': 'Error fetching issues'}), 500
-
-# ============================================================================
-# GET ISSUE DETAILS
-# ============================================================================
+    except Exception as error:
+        logger.error(f'❌ [GET_MY_ISSUES] Error: {error}')
+        return jsonify({'success': False, 'message': 'Error fetching issues', 'error': str(error)}), 500
 
 @issues_bp.route('/<int:issue_id>', methods=['GET'])
-@auth_required
+@token_required
 def get_issue_details(issue_id):
-    """Get issue details by ID"""
+    """Get issue details with attachments"""
     try:
-        logger.info(f'📍 [ISSUE DETAILS] Fetching issue: {issue_id}')
+        logger.info('=' * 60)
+        logger.info(f'📍 [GET_ISSUE] Request for issue {issue_id}')
+        logger.info('=' * 60)
         
+        user_id = request.user_id
+        
+        # Get issue with citizen info
+        logger.info(f'📍 [GET_ISSUE] Fetching issue data for ID: {issue_id}')
         issue = db.fetch_one(
-            '''SELECT 
-                i.*, 
-                ic.name as category_name,
-                c.id as citizen_id,
-                u.name as citizen_name,
-                u.email as citizen_email
+            '''SELECT i.id, i.citizen_id, i.category, i.description, i.status, 
+            i.created_at, i.updated_at, c.user_id
             FROM issues i
-            LEFT JOIN issue_categories ic ON i.category_id = ic.id
-            LEFT JOIN citizens c ON i.citizen_id = c.id
-            LEFT JOIN users u ON c.user_id = u.id
+            JOIN citizens c ON i.citizen_id = c.id
             WHERE i.id = %s''',
             (issue_id,)
         )
         
         if not issue:
+            logger.warning(f'❌ [GET_ISSUE] Issue not found: {issue_id}')
             return jsonify({'success': False, 'message': 'Issue not found'}), 404
         
-        # Get attachments
+        logger.info(f'✅ [GET_ISSUE] Issue found: {issue_id}')
+        
+        # Check ownership
+        if issue['user_id'] != user_id:
+            logger.warning(f'❌ [GET_ISSUE] Unauthorized access to issue {issue_id} by user {user_id}')
+            return jsonify({'success': False, 'message': 'Unauthorized access'}), 403
+        
+        logger.info(f'✅ [GET_ISSUE] User authorized for issue {issue_id}')
+        
+        # Get attachments - Fixed query without uploaded_at
+        logger.info(f'📍 [GET_ISSUE] Fetching attachments for issue {issue_id}')
         attachments = db.fetch_all(
-            'SELECT id, file_name, file_path FROM issue_attachments WHERE issue_id = %s',
+            '''SELECT id, filename, mimetype
+            FROM attachments
+            WHERE issue_id = %s AND comment_id IS NULL
+            ORDER BY id ASC''',
             (issue_id,)
         )
         
-        issue['attachments'] = attachments
+        if attachments:
+            logger.info(f'✅ [GET_ISSUE] Found {len(attachments)} attachments for issue {issue_id}')
+            for att in attachments:
+                logger.info(f'  - {att["filename"]} ({att["mimetype"]})')
+        else:
+            logger.info(f'📍 [GET_ISSUE] No attachments found for issue {issue_id}')
         
-        logger.info(f'✅ [ISSUE DETAILS] Issue retrieved')
+        logger.info('=' * 60)
+        logger.info(f'✅ [GET_ISSUE] SUCCESS - Issue {issue_id} retrieved')
+        logger.info('=' * 60)
         
         return jsonify({
             'success': True,
-            'message': 'Issue details retrieved successfully',
-            'data': issue
+            'data': {
+                'id': issue['id'],
+                'citizen_id': issue['citizen_id'],
+                'category': issue['category'],
+                'description': issue['description'],
+                'status': issue['status'],
+                'created_at': issue['created_at'].isoformat() if issue['created_at'] else None,
+                'updated_at': issue['updated_at'].isoformat() if issue['updated_at'] else None,
+                'attachments': attachments if attachments else []
+            }
         }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [ISSUE DETAILS] Error: {str(e)}')
-        return jsonify({'success': False, 'message': 'Error fetching issue'}), 500
+        
+    except Exception as error:
+        logger.error('=' * 60)
+        logger.error(f'❌ [GET_ISSUE] ERROR: {error}')
+        logger.error('=' * 60)
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'message': 'Error fetching issue', 'error': str(error)}), 500
 
-# ============================================================================
-# UPDATE ISSUE STATUS
-# ============================================================================
-
-@issues_bp.route('/<int:issue_id>/status', methods=['PUT'])
-@auth_required
-@official_required
-def update_issue_status(issue_id):
-    """Update issue status (official only)"""
+@issues_bp.route('/attachment/<int:attachment_id>', methods=['GET'])
+@token_required
+def download_attachment(attachment_id):
+    """Download attachment file"""
     try:
-        logger.info(f'📍 [UPDATE STATUS] Updating issue: {issue_id}')
+        logger.info(f'📍 [DOWNLOAD_ATTACHMENT] Request for attachment {attachment_id}')
+        user_id = request.user_id
         
-        data = request.get_json()
-        status = data.get('status', '').lower()
-        remarks = data.get('remarks', '').strip()
-        
-        try:
-            validate_status(status)
-        except ValidationError as e:
-            return jsonify({'success': False, 'message': str(e)}), 400
-        
-        result = db.execute_query(
-            '''UPDATE issues 
-               SET status = %s, remarks = %s, modified_by = %s, modified_at = NOW()
-               WHERE id = %s''',
-            (status, remarks, request.user['userId'], issue_id)
+        # Get attachment
+        attachment = db.fetch_one(
+            'SELECT id, filename, mimetype, data, issue_id FROM attachments WHERE id = %s',
+            (attachment_id,)
         )
         
-        if result['affected_rows'] == 0:
-            return jsonify({'success': False, 'message': 'Issue not found'}), 404
+        if not attachment:
+            logger.warning(f'❌ [DOWNLOAD_ATTACHMENT] Attachment not found: {attachment_id}')
+            return jsonify({'success': False, 'message': 'Attachment not found'}), 404
         
-        logger.info(f'✅ [UPDATE STATUS] Issue {issue_id} updated to: {status}')
-        
-        return jsonify({
-            'success': True,
-            'message': 'Issue status updated successfully',
-            'data': {'issueId': issue_id, 'status': status}
-        }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [UPDATE STATUS] Error: {str(e)}')
-        return jsonify({'success': False, 'message': 'Error updating issue'}), 500
-
-# ============================================================================
-# ESCALATE ISSUE
-# ============================================================================
-
-@issues_bp.route('/<int:issue_id>/escalate', methods=['POST'])
-@auth_required
-@official_required
-def escalate_issue(issue_id):
-    """Escalate issue to higher official"""
-    try:
-        logger.info(f'📍 [ESCALATE] Escalating issue: {issue_id}')
-        
-        data = request.get_json()
-        reason = data.get('reason', '').strip()
-        
-        if not reason:
-            return jsonify({'success': False, 'message': 'Escalation reason is required'}), 400
-        
-        result = db.execute_query(
-            '''UPDATE issues 
-               SET priority = 'high', status = 'escalated', remarks = %s, modified_by = %s, modified_at = NOW()
-               WHERE id = %s''',
-            (reason, request.user['userId'], issue_id)
+        # Verify user owns this issue
+        issue = db.fetch_one(
+            'SELECT i.id, c.user_id FROM issues i JOIN citizens c ON i.citizen_id = c.id WHERE i.id = %s',
+            (attachment['issue_id'],)
         )
         
-        if result['affected_rows'] == 0:
-            return jsonify({'success': False, 'message': 'Issue not found'}), 404
+        if not issue or issue['user_id'] != user_id:
+            logger.warning(f'❌ [DOWNLOAD_ATTACHMENT] Unauthorized access to attachment {attachment_id}')
+            return jsonify({'success': False, 'message': 'Unauthorized access'}), 403
         
-        logger.info(f'✅ [ESCALATE] Issue {issue_id} escalated')
+        logger.info(f'✅ [DOWNLOAD_ATTACHMENT] Sending file: {attachment["filename"]}')
         
-        return jsonify({
-            'success': True,
-            'message': 'Issue escalated successfully',
-            'data': {'issueId': issue_id, 'status': 'escalated', 'priority': 'high'}
-        }), 200
-    
-    except Exception as e:
-        logger.error(f'❌ [ESCALATE] Error: {str(e)}')
-        return jsonify({'success': False, 'message': 'Error escalating issue'}), 500
+        # Return file as attachment
+        from flask import send_file
+        from io import BytesIO
+        
+        return send_file(
+            BytesIO(attachment['data']),
+            mimetype=attachment['mimetype'],
+            as_attachment=True,
+            download_name=attachment['filename']
+        )
+        
+    except Exception as error:
+        logger.error(f'❌ [DOWNLOAD_ATTACHMENT] ERROR: {error}')
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'message': 'Error downloading attachment', 'error': str(error)}), 500

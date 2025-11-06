@@ -37,10 +37,12 @@ from config.database import db
 # Import blueprints
 from routes.auth import auth_bp
 from routes.issues import issues_bp
+from routes.dashboard import dashboard_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(issues_bp, url_prefix='/api/issues') 
+app.register_blueprint(dashboard_bp, url_prefix='/api/dashboard')
 
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])

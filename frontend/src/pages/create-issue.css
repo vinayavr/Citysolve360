@@ -1,60 +1,48 @@
 .create-issue-container {
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  padding: 20px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 2rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .create-issue-card {
   background: white;
-  padding: 40px;
   border-radius: 12px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-  max-width: 600px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+  max-width: 650px;
   width: 100%;
+  padding: 2.5rem;
+  animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .create-issue-card h1 {
-  font-size: 28px;
+  font-size: 1.8rem;
   color: #333;
-  margin-bottom: 10px;
-  text-align: center;
+  margin: 0 0 0.5rem 0;
+  font-weight: 700;
 }
 
 .subtitle {
-  text-align: center;
   color: #666;
-  margin-bottom: 30px;
-  font-size: 14px;
-}
-
-.error-message {
-  background-color: #f8d7da;
-  color: #721c24;
-  padding: 12px 15px;
-  border-radius: 5px;
-  margin-bottom: 20px;
-  border: 1px solid #f5c6cb;
-}
-
-.success-message {
-  background-color: #d4edda;
-  color: #155724;
-  padding: 12px 15px;
-  border-radius: 5px;
-  margin-bottom: 20px;
-  border: 1px solid #c3e6cb;
-}
-
-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+  font-size: 0.95rem;
+  margin: 0 0 1.5rem 0;
 }
 
 .form-group {
+  margin-bottom: 1.5rem;
   display: flex;
   flex-direction: column;
 }
@@ -62,111 +50,257 @@ form {
 .form-group label {
   font-weight: 600;
   color: #333;
-  margin-bottom: 8px;
-  font-size: 14px;
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
 }
 
-.form-group input,
-.form-group textarea,
-.form-group select {
-  padding: 12px;
+.required {
+  color: #e74c3c;
+}
+
+.form-group select,
+.form-group textarea {
+  padding: 0.85rem;
   border: 2px solid #e0e0e0;
-  border-radius: 5px;
-  font-size: 14px;
-  font-family: inherit;
-  transition: border-color 0.3s ease;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  transition: all 0.3s ease;
+  background-color: white;
 }
 
-.form-group input:focus,
-.form-group textarea:focus,
-.form-group select:focus {
+.form-group select:focus,
+.form-group textarea:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
-.form-group input:disabled,
-.form-group textarea:disabled,
-.form-group select:disabled {
-  background-color: #f5f5f5;
-  cursor: not-allowed;
-}
-
 .form-group textarea {
   resize: vertical;
-  min-height: 120px;
+  min-height: 130px;
+  line-height: 1.5;
 }
 
 .form-group small {
+  font-size: 0.8rem;
   color: #999;
-  font-size: 12px;
-  margin-top: 5px;
+  margin-top: 0.4rem;
   text-align: right;
+}
+
+.file-upload-area {
+  position: relative;
+}
+
+.file-input-hidden {
+  display: none;
+}
+
+.file-upload-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  border: 2px dashed #667eea;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.file-upload-label:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+  border-color: #764ba2;
+}
+
+.upload-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  color: #667eea;
+  margin-bottom: 0.75rem;
+}
+
+.file-upload-label span {
+  font-weight: 600;
+  color: #333;
+  font-size: 1rem;
+}
+
+.file-upload-label small {
+  font-size: 0.85rem;
+  color: #999;
+  margin-top: 0.35rem;
+}
+
+.attachments-list {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9ff;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+.attachments-list h4 {
+  margin: 0 0 0.75rem 0;
+  color: #333;
+  font-size: 0.9rem;
+}
+
+.attachments-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.attachment-item:last-child {
+  border-bottom: none;
+}
+
+.file-name {
+  font-weight: 500;
+  color: #333;
+  font-size: 0.9rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-size {
+  font-size: 0.8rem;
+  color: #999;
+  margin: 0 0.75rem;
+}
+
+.remove-attachment-btn {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.remove-attachment-btn:hover:not(:disabled) {
+  background: #c0392b;
+  transform: scale(1.1);
+}
+
+.remove-attachment-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .form-actions {
   display: flex;
-  gap: 10px;
-  margin-top: 20px;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e0e0e0;
 }
 
 .btn-submit,
 .btn-cancel {
-  padding: 12px 24px;
+  padding: 0.9rem 2rem;
   border: none;
-  border-radius: 5px;
-  font-size: 14px;
+  border-radius: 8px;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  flex: 1;
 }
 
 .btn-submit {
-  background-color: #667eea;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
 }
 
 .btn-submit:hover:not(:disabled) {
-  background-color: #5568d3;
   transform: translateY(-2px);
-  box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-}
-
-.btn-submit:disabled {
-  background-color: #ccc;
-  cursor: not-allowed;
+  box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
 }
 
 .btn-cancel {
-  background-color: #e0e0e0;
+  background: #e0e0e0;
   color: #333;
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background-color: #d0d0d0;
+  background: #d0d0d0;
 }
 
+.btn-submit:disabled,
 .btn-cancel:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-/* Responsive Design */
+.alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  animation: slideDown 0.3s ease-out;
+  border-left: 4px solid;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.alert-error {
+  background: #fadbd8;
+  border-left-color: #e74c3c;
+  color: #c0392b;
+  font-size: 0.9rem;
+}
+
+.alert-success {
+  background: #d4edda;
+  border-left-color: #27ae60;
+  color: #1e7e34;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 768px) {
   .create-issue-container {
-    padding: 10px;
+    padding: 1rem;
   }
 
   .create-issue-card {
-    padding: 20px;
+    padding: 1.5rem;
   }
 
   .create-issue-card h1 {
-    font-size: 22px;
+    font-size: 1.5rem;
   }
 
   .form-actions {
-    flex-direction: column;
+    flex-direction: column-reverse;
   }
 
   .btn-submit,
