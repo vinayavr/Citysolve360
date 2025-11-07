@@ -6,30 +6,34 @@ import os
 import logging
 
 logger = logging.getLogger(__name__)
-
 dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
-
 JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-this')
+
 
 def token_required(f):
     """Decorator to verify JWT token from Authorization header"""
     @wraps(f)
     def decorated(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
+        
         if not auth_header or not auth_header.startswith('Bearer '):
             logger.warning('❌ [TOKEN_REQUIRED] No token provided')
             return jsonify({'success': False, 'message': 'Token is missing'}), 401
         
         token = auth_header[7:]  # Remove 'Bearer ' prefix
+        
         try:
             logger.info('📍 [TOKEN_REQUIRED] Verifying token...')
             # Decode using same secret as auth.py
             data = jwt.decode(token, os.getenv('JWT_SECRET'), algorithms=['HS256'])
             request.user_id = data.get('userId')  # Use userId (capital U)
+            
             if not request.user_id:
                 logger.warning('❌ [TOKEN_REQUIRED] userId not found in token')
                 return jsonify({'success': False, 'message': 'Invalid token'}), 401
+            
             logger.info(f'✅ [TOKEN_REQUIRED] Token verified for user: {request.user_id}')
+            
         except jwt.ExpiredSignatureError:
             logger.warning('❌ [TOKEN_REQUIRED] Token has expired')
             return jsonify({'success': False, 'message': 'Token has expired'}), 401
@@ -41,7 +45,9 @@ def token_required(f):
             return jsonify({'success': False, 'message': 'Token validation failed'}), 401
         
         return f(*args, **kwargs)
+    
     return decorated
+
 
 @dashboard_bp.route('/citizen/issues', methods=['GET'])
 @token_required
@@ -50,6 +56,7 @@ def citizen_dashboard():
     try:
         logger.info('📍 [CITIZEN_DASHBOARD] Request received')
         user_id = request.user_id
+        
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 10, type=int)
         offset = (page - 1) * limit
@@ -57,6 +64,7 @@ def citizen_dashboard():
         
         # Get citizen_id
         citizen = db.fetch_one('SELECT id FROM citizens WHERE user_id = %s', (user_id,))
+        
         if not citizen:
             logger.warning(f'❌ [CITIZEN_DASHBOARD] Citizen not found for user {user_id}')
             return jsonify({'success': False, 'message': 'Citizen profile not found'}), 404
@@ -74,6 +82,7 @@ def citizen_dashboard():
                 LIMIT %s OFFSET %s''',
                 (citizen_id, status_filter, limit, offset)
             )
+            
             total_result = db.fetch_one(
                 'SELECT COUNT(*) as total FROM issues WHERE citizen_id = %s AND status = %s',
                 (citizen_id, status_filter)
@@ -87,9 +96,11 @@ def citizen_dashboard():
                 LIMIT %s OFFSET %s''',
                 (citizen_id, limit, offset)
             )
+            
             total_result = db.fetch_one('SELECT COUNT(*) as total FROM issues WHERE citizen_id = %s', (citizen_id,))
         
         total_count = total_result['total'] if total_result else 0
+        
         logger.info(f'✅ [CITIZEN_DASHBOARD] Found {len(issues)} issues')
         
         return jsonify({
@@ -118,6 +129,7 @@ def citizen_statistics():
         
         # Get citizen_id
         citizen = db.fetch_one('SELECT id FROM citizens WHERE user_id = %s', (user_id,))
+        
         if not citizen:
             logger.warning(f'❌ [CITIZEN_STATISTICS] Citizen not found for user {user_id}')
             return jsonify({'success': False, 'message': 'Citizen profile not found'}), 404
@@ -140,7 +152,7 @@ def citizen_statistics():
         statistics = {
             'total': total_issues,
             'created': 0,
-            'in_progress': 0,
+            'in progress': 0,
             'escalated': 0,
             'rejected': 0,
             'completed': 0
@@ -161,107 +173,126 @@ def citizen_statistics():
 
 @dashboard_bp.route('/official/issues', methods=['GET'])
 @token_required
-def official_dashboard():
-    """Get issues for official's department"""
+def get_official_issues():
+    """Get issues assigned to official's category"""
     try:
+        logger.info('=' * 60)
         logger.info('📍 [OFFICIAL_DASHBOARD] Request received')
-        user_id = request.user_id
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
-        offset = (page - 1) * limit
+        logger.info('=' * 60)
         
-        # Get official and department
-        official = db.fetch_one('SELECT id, department FROM officials WHERE user_id = %s', (user_id,))
-        if not official:
-            logger.warning(f'❌ [OFFICIAL_DASHBOARD] Official not found for user {user_id}')
+        user_id = request.user_id
+        
+        # Get all official categories for this user
+        logger.info(f'📍 [OFFICIAL_DASHBOARD] Getting official categories for user {user_id}')
+        official_categories = db.fetch_all(
+            '''SELECT o.id, o.issue_category_id, ic.name as category_name
+            FROM officials o
+            JOIN issue_categories ic ON o.issue_category_id = ic.id
+            WHERE o.user_id = %s''',
+            (user_id,)
+        )
+        
+        if not official_categories:
+            logger.warning(f'❌ [OFFICIAL_DASHBOARD] No official profile found for user {user_id}')
             return jsonify({'success': False, 'message': 'Official profile not found'}), 404
         
-        department = official['department']
-        logger.info(f'✅ [OFFICIAL_DASHBOARD] Department: {department}')
+        logger.info(f'✅ [OFFICIAL_DASHBOARD] Official found with {len(official_categories)} categories')
         
-        # Get issues for this department (excluding escalated)
+        # Get all category names this official handles
+        category_names = [cat['category_name'] for cat in official_categories]
+        
+        # Get all issues in these categories
+        logger.info(f'📍 [OFFICIAL_DASHBOARD] Fetching issues for categories: {category_names}')
+        placeholders = ','.join(['%s'] * len(category_names))
         issues = db.fetch_all(
-            '''SELECT id, category, description, status, created_at, updated_at, citizen_id
-            FROM issues
-            WHERE category = %s AND status != 'escalated'
-            ORDER BY created_at DESC
-            LIMIT %s OFFSET %s''',
-            (department, limit, offset)
+            f'''SELECT i.id, i.citizen_id, i.category, i.description, i.status, i.created_at, i.updated_at
+            FROM issues i
+            WHERE i.category IN ({placeholders})
+            ORDER BY i.created_at DESC''',
+            tuple(category_names)
         )
         
-        total_result = db.fetch_one(
-            'SELECT COUNT(*) as total FROM issues WHERE category = %s AND status != %s',
-            (department, 'escalated')
-        )
-        total_count = total_result['total'] if total_result else 0
+        if not issues:
+            logger.info(f'📍 [OFFICIAL_DASHBOARD] No issues found for categories')
+            issues = []
+        else:
+            logger.info(f'✅ [OFFICIAL_DASHBOARD] Found {len(issues)} issues')
         
-        logger.info(f'✅ [OFFICIAL_DASHBOARD] Found {len(issues)} issues')
+        logger.info('=' * 60)
+        logger.info('✅ [OFFICIAL_DASHBOARD] SUCCESS')
+        logger.info('=' * 60)
         
         return jsonify({
             'success': True,
             'data': issues,
-            'pagination': {
-                'page': page,
-                'limit': limit,
-                'total': total_count,
-                'pages': (total_count + limit - 1) // limit
-            }
+            'categories': category_names,
+            'count': len(issues)
         }), 200
         
     except Exception as error:
-        logger.error(f'❌ [OFFICIAL_DASHBOARD] Error: {error}')
-        return jsonify({'success': False, 'message': 'Error fetching dashboard data', 'error': str(error)}), 500
+        logger.error('=' * 60)
+        logger.error(f'❌ [OFFICIAL_DASHBOARD] ERROR: {error}')
+        logger.error('=' * 60)
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'message': 'Error fetching issues', 'error': str(error)}), 500
 
 
 @dashboard_bp.route('/higher-official/issues', methods=['GET'])
 @token_required
-def higher_official_dashboard():
-    """Get escalated issues for higher official"""
+def get_higher_official_issues():
+    """Get all issues for higher official (with escalation focus)"""
     try:
+        logger.info('=' * 60)
         logger.info('📍 [HIGHER_OFFICIAL_DASHBOARD] Request received')
+        logger.info('=' * 60)
+        
         user_id = request.user_id
-        page = request.args.get('page', 1, type=int)
-        limit = request.args.get('limit', 10, type=int)
-        offset = (page - 1) * limit
         
-        # Get higher official and department
-        official = db.fetch_one('SELECT id, department FROM officials WHERE user_id = %s AND reports_to IS NULL', (user_id,))
-        if not official:
-            logger.warning(f'❌ [HIGHER_OFFICIAL_DASHBOARD] Higher official not found for user {user_id}')
-            return jsonify({'success': False, 'message': 'Higher official profile not found'}), 404
+        # Verify user is higher_official
+        user = db.fetch_one('SELECT role FROM users WHERE id = %s', (user_id,))
         
-        department = official['department']
-        logger.info(f'✅ [HIGHER_OFFICIAL_DASHBOARD] Department: {department}')
+        if user['role'] != 'higherofficial':
+            logger.warning(f'❌ [HIGHER_OFFICIAL_DASHBOARD] Unauthorized: user {user_id} is {user["role"]}')
+            return jsonify({'success': False, 'message': 'Only higher officials can access this'}), 403
         
-        # Get escalated issues for this department
+        logger.info(f'✅ [HIGHER_OFFICIAL_DASHBOARD] User authorized')
+        
+        # Get ALL issues (higher official sees everything)
         issues = db.fetch_all(
-            '''SELECT id, category, description, status, created_at, updated_at, citizen_id
-            FROM issues
-            WHERE category = %s AND status = 'escalated'
-            ORDER BY created_at DESC
-            LIMIT %s OFFSET %s''',
-            (department, limit, offset)
+            '''SELECT i.id, i.citizen_id, i.category, i.description, i.status,
+                      i.created_at, i.updated_at
+            FROM issues i
+            WHERE i.status NOT IN ('completed', 'rejected')
+            ORDER BY 
+              CASE i.status
+                WHEN 'escalated' THEN 0
+                WHEN 'in progress' THEN 1
+                WHEN 'created' THEN 2
+              END,
+              i.created_at DESC'''
         )
         
-        total_result = db.fetch_one(
-            'SELECT COUNT(*) as total FROM issues WHERE category = %s AND status = %s',
-            (department, 'escalated')
-        )
-        total_count = total_result['total'] if total_result else 0
+        if not issues:
+            logger.info('📍 [HIGHER_OFFICIAL_DASHBOARD] No issues found')
+            issues = []
+        else:
+            logger.info(f'✅ [HIGHER_OFFICIAL_DASHBOARD] Found {len(issues)} issues')
         
-        logger.info(f'✅ [HIGHER_OFFICIAL_DASHBOARD] Found {len(issues)} escalated issues')
+        logger.info('=' * 60)
+        logger.info('✅ [HIGHER_OFFICIAL_DASHBOARD] SUCCESS')
+        logger.info('=' * 60)
         
         return jsonify({
             'success': True,
             'data': issues,
-            'pagination': {
-                'page': page,
-                'limit': limit,
-                'total': total_count,
-                'pages': (total_count + limit - 1) // limit
-            }
+            'count': len(issues)
         }), 200
         
     except Exception as error:
-        logger.error(f'❌ [HIGHER_OFFICIAL_DASHBOARD] Error: {error}')
-        return jsonify({'success': False, 'message': 'Error fetching dashboard data', 'error': str(error)}), 500
+        logger.error('=' * 60)
+        logger.error(f'❌ [HIGHER_OFFICIAL_DASHBOARD] ERROR: {error}')
+        logger.error('=' * 60)
+        import traceback
+        logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'message': 'Error fetching issues', 'error': str(error)}), 500

@@ -7,8 +7,10 @@ import os
 from config.database import db
 from utils.validators import validate_all, ValidationError
 
+
 logger = logging.getLogger(__name__)
 auth_bp = Blueprint('auth', __name__)
+
 
 def hash_password(password):
     """Hash password using bcrypt"""
@@ -20,6 +22,7 @@ def hash_password(password):
         logger.error(f'Password hashing error: {str(e)}')
         return None
 
+
 def verify_password(plain_password, hashed_password):
     """Verify password against hash"""
     try:
@@ -30,6 +33,7 @@ def verify_password(plain_password, hashed_password):
     except Exception as e:
         logger.error(f'Password verification error: {str(e)}')
         return False
+
 
 def generate_token(user_id, role, citizen_id=None):
     """Generate JWT token"""
@@ -51,6 +55,7 @@ def generate_token(user_id, role, citizen_id=None):
         logger.error(f'Token generation error: {str(e)}')
         return None
 
+
 def verify_token(token):
     """Verify JWT token"""
     try:
@@ -64,6 +69,7 @@ def verify_token(token):
         return {'error': 'Token expired'}
     except jwt.InvalidTokenError:
         return {'error': 'Invalid token'}
+
 
 # ============================================================================
 # REGISTER ENDPOINT
@@ -195,7 +201,8 @@ def register():
                 'phone': phone,
                 'address': address,
                 'role': 'citizen',
-                'citizenId': citizen_id
+                'citizenId': citizen_id,
+                'redirect': '/citizen/dashboard'  # ADD THIS
             }
         }), 201
     
@@ -211,9 +218,11 @@ def register():
             'message': f'Server error: {str(e)}'
         }), 500
 
+
 # ============================================================================
 # LOGIN ENDPOINT
 # ============================================================================
+
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
@@ -269,6 +278,7 @@ def login():
         citizen_id = None
         phone = None
         address = None
+        redirect_path = None  # ADD THIS
         
         if user['role'] == 'citizen':
             logger.info(f'📍 [LOGIN] Fetching citizen details for user: {user["id"]}')
@@ -287,7 +297,35 @@ def login():
             citizen_id = citizen['id']
             phone = citizen['phone']
             address = citizen['address']
+            redirect_path = '/citizen/dashboard'  # ADD THIS
             logger.info(f'✅ [LOGIN] Citizen found with ID: {citizen_id}')
+        
+        # HANDLE OFFICIAL LOGIN
+        elif user['role'] == 'official':
+            logger.info(f'📍 [LOGIN] Fetching official details for user: {user["id"]}')
+            official = db.fetch_one(
+                '''SELECT o.id, o.issue_category_id, ic.name as category_name
+                FROM officials o
+                JOIN issue_categories ic ON o.issue_category_id = ic.id
+                WHERE o.user_id = %s''',
+                (user['id'],)
+            )
+            
+            if not official:
+                logger.warning(f'❌ [LOGIN] Official profile not found for user: {email}')
+                return jsonify({
+                    'success': False,
+                    'message': 'Official profile not found. Contact support.'
+                }), 500
+            
+            redirect_path = '/official/dashboard'  # ADD THIS
+            logger.info(f'✅ [LOGIN] Official found with category: {official["category_name"]}')
+        
+        # HANDLE HIGHER OFFICIAL LOGIN
+        elif user['role'] in ['higher_official', 'higherofficial']:
+            logger.info(f'📍 [LOGIN] HigherOfficial user: {user["id"]}')
+            redirect_path = '/higher-official/dashboard'  # ADD THIS
+            logger.info(f'✅ [LOGIN] HigherOfficial authenticated')
         
         # Generate token
         logger.info('📍 [LOGIN] Generating JWT token...')
@@ -302,7 +340,7 @@ def login():
         
         logger.info(f'✅ [LOGIN] JWT token generated successfully')
         logger.info('=' * 60)
-        logger.info(f'✅ [LOGIN] LOGIN SUCCESSFUL for: {email}')
+        logger.info(f'✅ [LOGIN] LOGIN SUCCESSFUL for: {email} (Role: {user["role"]})')
         logger.info('=' * 60)
         
         return jsonify({
@@ -316,7 +354,8 @@ def login():
                 'phone': phone,
                 'address': address,
                 'role': user['role'],
-                'citizenId': citizen_id
+                'citizenId': citizen_id,
+                'redirect': redirect_path  # ADD THIS - IMPORTANT
             }
         }), 200
     
@@ -332,9 +371,11 @@ def login():
             'message': f'Server error: {str(e)}'
         }), 500
 
+
 # ============================================================================
 # GET PROFILE ENDPOINT
 # ============================================================================
+
 
 @auth_bp.route('/profile', methods=['GET'])
 def get_profile():

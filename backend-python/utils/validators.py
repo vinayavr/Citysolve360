@@ -61,7 +61,7 @@ def validate_priority(priority):
 
 def validate_status(status):
     """Validate status"""
-    valid_statuses = ['open', 'in_progress', 'resolved', 'closed', 'escalated']
+    valid_statuses = ['open', 'in progress', 'resolved', 'closed', 'escalated']
     if status not in valid_statuses:
         raise ValidationError(f'Status must be one of: {", ".join(valid_statuses)}')
 

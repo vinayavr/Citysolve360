@@ -69,20 +69,40 @@ const Login = () => {
     setLoading(true);
 
     try {
+      console.log('🔐 [LOGIN] Attempting login with email:', formData.email.toLowerCase());
+      
       const user = await login(formData.email.trim().toLowerCase(), formData.password);
       
-      // Navigate based on role
-      if (user.role === 'citizen') {
-        navigate('/citizen/dashboard');
-      } else if (user.role === 'official' || user.role === 'higherofficial') {
-        navigate('/official/dashboard');
-      } else {
-        navigate('/');
+      console.log('✅ [LOGIN] Login successful');
+      console.log('📍 [LOGIN] User data:', user);
+      console.log('📍 [LOGIN] User role:', user.role);
+      
+      // ⭐ FIXED: Role mapping (note: backend sends 'higherofficial' lowercase)
+      const rolePathMap = {
+        'citizen': '/citizen/dashboard',
+        'official': '/official/dashboard',
+        'higherofficial': '/higher-official/dashboard'  // ✅ FIXED: lowercase
+      };
+
+      const redirectPath = rolePathMap[user.role];
+      
+      console.log('📍 [LOGIN] Role from backend:', user.role);
+      console.log('📍 [LOGIN] Redirect path:', redirectPath);
+
+      if (!redirectPath) {
+        console.error('❌ [LOGIN] Unknown role:', user.role);
+        setError(`Unknown role: ${user.role}`);
+        setLoading(false);
+        return;
       }
+
+      console.log('✅ [LOGIN] Navigating to:', redirectPath);
+      navigate(redirectPath, { replace: true });
+
     } catch (err) {
-      console.error('Login error:', err);
-      setError(typeof err === 'string' ? err : 'Login failed. Please check your credentials.');
-    } finally {
+      console.error('❌ [LOGIN] Login error:', err);
+      const errorMessage = typeof err === 'string' ? err : 'Login failed. Please check your credentials.';
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -151,6 +171,17 @@ const Login = () => {
         <p className="auth-footer">
           Don't have an account? <Link to="/register">Sign Up as Citizen</Link>
         </p>
+
+        {/* Test Credentials Help */}
+        <div style={{ marginTop: '2rem', padding: '1rem', background: '#f0f0f0', borderRadius: '8px', fontSize: '0.85rem' }}>
+          <strong>📋 Test Credentials:</strong>
+          <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+            <li>👤 Citizen: alice1@example.com</li>
+            <li>👨‍💼 Official: frank.official1@citysolve.com</li>
+            <li>👨‍⚖️ Higher Official: isabel.higher@citysolve.com</li>
+          </ul>
+          <p style={{ margin: '0.5rem 0', color: '#666' }}>Password: (Check your backend)</p>
+        </div>
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ export const ISSUE_PRIORITIES = [
 export const ISSUE_STATUSES = [
   { value: 'pending', label: 'Pending', color: '#9e9e9e' },
   { value: 'assigned', label: 'Assigned', color: '#2196f3' },
-  { value: 'in_progress', label: 'In Progress', color: '#ff9800' },
+  { value: 'in progress', label: 'In Progress', color: '#ff9800' },
   { value: 'resolved', label: 'Resolved', color: '#4caf50' },
   { value: 'closed', label: 'Closed', color: '#607d8b' },
   { value: 'rejected', label: 'Rejected', color: '#f44336' }
