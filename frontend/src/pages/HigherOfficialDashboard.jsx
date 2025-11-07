@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Dashboard.css';
+import { useAuth } from '../contexts/AuthContext'; 
 
 const HigherOfficialDashboard = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   
   const [issues, setIssues] = useState([]);
@@ -27,7 +29,6 @@ const HigherOfficialDashboard = () => {
       'Traffic Signal': { priority: 'medium', hours: 120, resolution: 336 },
       'Parking Violation': { priority: 'low', hours: 168, resolution: 504 },
       'Noise Complaint': { priority: 'low', hours: 168, resolution: 504 },
-      'Others': { priority: 'medium', hours: 120, resolution: 336 }
     };
     return timelines[category] || { priority: 'medium', hours: 120, resolution: 336 };
   };
@@ -121,8 +122,11 @@ const HigherOfficialDashboard = () => {
     <div className="dashboard-container">
       <div className="dashboard-header">
         <div className="header-left">
-          <h1>Higher Official Dashboard</h1>
-          <p className="header-subtitle">Monitor all issues • Review escalations</p>
+          <h1>All Issues & Escalations</h1>
+          <p className="header-subtitle">👤 Higher Officer: {user?.name}</p>
+          <p className="header-subtitle" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+            {user?.email}
+          </p>
         </div>
         <div className="header-right">
           <button onClick={handleLogout} className="btn-logout">

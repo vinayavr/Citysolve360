@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Dashboard.css';
+import { useAuth } from '../contexts/AuthContext'; 
 
 const CitizenDashboard = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   
   const [issues, setIssues] = useState([]);
@@ -15,14 +17,49 @@ const CitizenDashboard = () => {
   const [escalationNote, setEscalationNote] = useState('');
   const [escalating, setEscalating] = useState(false);
   const [showEscalationModal, setShowEscalationModal] = useState(false);
+  const [categoryTimelines, setCategoryTimelines] = useState({}); // 🆕 Store timelines from DB
 
   useEffect(() => {
+    fetchCategoryTimelines(); // 🆕 Fetch timelines first
     fetchIssues();
   }, []);
 
-  // Timeline mapping for different categories
-  const getTimelineForCategory = (category) => {
-    const timelines = {
+  // 🆕 Fetch timelines from database
+  const fetchCategoryTimelines = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(
+        'http://localhost:5000/api/issue-categories',
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.data.success) {
+        const timelinesMap = {};
+        response.data.data.forEach(cat => {
+          timelinesMap[cat.name] = {
+            priority: cat.priority,
+            hours: cat.response_hours,
+            resolution: cat.resolution_hours
+          };
+        });
+        setCategoryTimelines(timelinesMap);
+        console.log('✅ Loaded category timelines from DB:', timelinesMap);
+      }
+    } catch (err) {
+      console.error('Error fetching timelines:', err);
+      console.log('⚠️ Using fallback timelines');
+      setFallbackTimelines();
+    }
+  };
+
+  // 🆕 Fallback hardcoded timelines (if DB fetch fails)
+  const setFallbackTimelines = () => {
+    const fallbackTimelines = {
       'Public Safety': { priority: 'critical', hours: 6, resolution: 24 },
       'Water Leak': { priority: 'critical', hours: 24, resolution: 48 },
       'Drainage Problems': { priority: 'critical', hours: 24, resolution: 48 },
@@ -34,7 +71,12 @@ const CitizenDashboard = () => {
       'Noise Complaint': { priority: 'low', hours: 168, resolution: 504 },
       'Others': { priority: 'medium', hours: 120, resolution: 336 }
     };
-    return timelines[category] || { priority: 'medium', hours: 120, resolution: 336 };
+    setCategoryTimelines(fallbackTimelines);
+  };
+
+  // 🆕 Get timeline - uses DB data, falls back to hardcoded
+  const getTimelineForCategory = (category) => {
+    return categoryTimelines[category] || { priority: 'medium', hours: 120, resolution: 336 };
   };
 
   // Get priority color
@@ -206,13 +248,11 @@ const CitizenDashboard = () => {
       console.log('Escalation response:', response.data);
 
       if (response.data.success) {
-        // Update selected issue status
         setSelectedIssue({
           ...selectedIssue,
           status: 'escalated'
         });
 
-        // Update issues list
         setIssues(
           issues.map(issue =>
             issue.id === selectedIssue.id
@@ -221,12 +261,10 @@ const CitizenDashboard = () => {
           )
         );
 
-        // Show success
         setShowEscalationModal(false);
         alert('✅ Issue escalated successfully to higher authority');
         console.log('✅ Issue escalated');
 
-        // Refresh
         setTimeout(() => {
           fetchIssues();
         }, 1000);
@@ -258,6 +296,7 @@ const CitizenDashboard = () => {
           <div className="dashboard-header">
             <div className="header-left">
               <h1>My Issues</h1>
+              <p className="header-subtitle">👤 Welcome, {user?.name}!</p>
               <p className="header-subtitle">Track and manage your reported issues</p>
             </div>
             <div className="header-right">
@@ -300,7 +339,6 @@ const CitizenDashboard = () => {
                     onClick={() => handleViewIssue(issue.id)}
                     style={{ cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
                   >
-                    {/* Timeline Badge in corner */}
                     <div style={{
                       position: 'absolute',
                       top: '0',
@@ -339,7 +377,6 @@ const CitizenDashboard = () => {
                         {issue.description}
                       </p>
 
-                      {/* Timeline Info */}
                       <div style={{
                         background: '#f0f7ff',
                         border: `1px solid ${priorityColor}40`,
@@ -533,28 +570,35 @@ const CitizenDashboard = () => {
                   )}
                 </div>
 
-                {/* Escalation Button */}
-                {['created', 'in_progress'].includes(selectedIssue.status) && (
-                  <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #ddd' }}>
-                    <button
-                      onClick={() => setShowEscalationModal(true)}
-                      style={{
-                        padding: '0.85rem 1.5rem',
-                        background: '#e67e22',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        fontWeight: '600',
-                        fontSize: '0.95rem',
-                        width: '100%',
-                        transition: 'all 0.3s'
-                      }}
-                    >
-                      ⚠️ Escalate to Higher Authority
-                    </button>
-                  </div>
-                )}
+                {/* ⭐ ESCALATION BUTTON - Only if timeline elapsed */}
+                {(() => {
+                  const timeline = getTimelineForCategory(selectedIssue.category);
+                  const createdTime = new Date(selectedIssue.created_at);
+                  const elapsedHours = (new Date() - createdTime) / (1000 * 60 * 60);
+                  const canEscalate = selectedIssue.status === 'created' && elapsedHours >= timeline.hours;
+                  
+                  return canEscalate ? (
+                    <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #ddd' }}>
+                      <button
+                        onClick={() => setShowEscalationModal(true)}
+                        style={{
+                          padding: '0.85rem 1.5rem',
+                          background: '#e67e22',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '600',
+                          fontSize: '0.95rem',
+                          width: '100%',
+                          transition: 'all 0.3s'
+                        }}
+                      >
+                        ⚠️ Escalate to Higher Authority
+                      </button>
+                    </div>
+                  ) : null;
+                })()}
 
                 <div className="issue-details-footer">
                   <button onClick={handleCloseDetails} className="btn-secondary">

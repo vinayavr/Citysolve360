@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './Dashboard.css';
+import { useAuth } from '../contexts/AuthContext'; 
 
 const OfficialDashboard = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   
   const [issues, setIssues] = useState([]);
@@ -130,18 +132,20 @@ const OfficialDashboard = () => {
     <div className="dashboard-container">
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         
-        {/* Header */}
-        <div className="dashboard-header">
-          <div className="header-left">
-            <h1>Official Dashboard</h1>
-            <p className="header-subtitle">Manage and track issue resolutions</p>
-          </div>
-          <div className="header-right">
-            <button onClick={handleLogout} className="btn-logout">
-              Logout
-            </button>
-          </div>
+       <div className="dashboard-header">
+        <div className="header-left">
+          <h1>Assigned Issues</h1>
+          <p className="header-subtitle">👤 Officer: {user?.name}</p>
+          <p className="header-subtitle" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+            {user?.email}
+          </p>
         </div>
+        <div className="header-right">
+          <button onClick={handleLogout} className="btn-logout">
+            Logout
+          </button>
+        </div>
+      </div>
 
         {error && (
           <div className="error-message">
