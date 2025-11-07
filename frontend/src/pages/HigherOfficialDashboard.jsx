@@ -94,7 +94,7 @@ const HigherOfficialDashboard = () => {
   const stats = {
     total: issues.length,
     escalated: issues.filter(i => i.status === 'escalated').length,
-    inProgress: issues.filter(i => i.status === 'in progress').length,
+    inProgress: issues.filter(i => i.status === 'in_progress').length,
     created: issues.filter(i => i.status === 'created').length,
     completed: issues.filter(i => i.status === 'completed').length,
     rejected: issues.filter(i => i.status === 'rejected').length
@@ -102,7 +102,7 @@ const HigherOfficialDashboard = () => {
 
   const filterOptions = [
     { value: 'escalated', label: '⚠️ Escalated', count: stats.escalated, color: '#e67e22' },
-    { value: 'in progress', label: '⏳ In Progress', count: stats.inProgress, color: '#f39c12' },
+    { value: 'in_progress', label: '⏳ In_progress', count: stats.inProgress, color: '#f39c12' },
     { value: 'created', label: '📝 Created', count: stats.created, color: '#3498db' },
     { value: 'all', label: '📊 All Issues', count: stats.total, color: '#667eea' },
   ];

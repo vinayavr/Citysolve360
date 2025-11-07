@@ -199,7 +199,7 @@ const CommentSection = ({ issueId, onActionComplete }) => {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
           <button
-            onClick={() => handleActionButton('in progress')}
+            onClick={() => handleActionButton('in_progress')}
             disabled={submitting}
             style={{
               padding: '0.75rem',
@@ -211,7 +211,7 @@ const CommentSection = ({ issueId, onActionComplete }) => {
               fontWeight: '600'
             }}
           >
-            {submitting ? '⏳ Processing...' : '▶️ In Progress'}
+            {submitting ? '⏳ Processing...' : '▶️ In_progress'}
           </button>
 
           <button

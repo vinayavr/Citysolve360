@@ -400,7 +400,7 @@ def add_comment(issue_id):
             return jsonify({'success': False, 'message': 'Comment too long (max 5000 chars)'}), 400
         
         # Validate status is one of the allowed values
-        valid_statuses = ['in progress', 'rejected', 'completed']
+        valid_statuses = ['in_progress', 'rejected', 'completed']
         if new_status not in valid_statuses:
             logger.warning(f'❌ [ADD_COMMENT] Invalid status: {new_status}')
             return jsonify({'success': False, 'message': f'Invalid status. Must be one of: {valid_statuses}'}), 400
@@ -547,7 +547,7 @@ def update_issue_status(issue_id):
         logger.info(f'📍 [UPDATE_STATUS] User {user_id}, new status: {new_status}')
         
         # Validate status
-        valid_statuses = ['created', 'in progress', 'escalated', 'rejected', 'completed']
+        valid_statuses = ['created', 'in_progress', 'escalated', 'rejected', 'completed']
         if new_status not in valid_statuses:
             logger.warning(f'❌ [UPDATE_STATUS] Invalid status: {new_status}')
             return jsonify({'success': False, 'message': f'Invalid status. Must be one of: {valid_statuses}'}), 400
@@ -730,7 +730,7 @@ def escalate_issue(issue_id):
             return jsonify({'success': False, 'message': 'Unauthorized'}), 403
         
         # Check status
-        if issue['status'] not in ['created', 'in progress']:
+        if issue['status'] not in ['created', 'in_progress']:
             logger.warning(f'❌ [ESCALATE] Cannot escalate status: {issue["status"]}')
             return jsonify({'success': False, 'message': f'Cannot escalate {issue["status"]} issues'}), 400
         

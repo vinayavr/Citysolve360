@@ -534,7 +534,7 @@ const CitizenDashboard = () => {
                 </div>
 
                 {/* Escalation Button */}
-                {['created', 'in progress'].includes(selectedIssue.status) && (
+                {['created', 'in_progress'].includes(selectedIssue.status) && (
                   <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #ddd' }}>
                     <button
                       onClick={() => setShowEscalationModal(true)}

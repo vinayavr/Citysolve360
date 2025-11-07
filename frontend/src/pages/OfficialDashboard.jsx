@@ -100,7 +100,7 @@ const OfficialDashboard = () => {
   const stats = {
     total: issues.length,
     created: issues.filter(i => i.status === 'created').length,
-    inProgress: issues.filter(i => i.status === 'in progress').length,
+    inProgress: issues.filter(i => i.status === 'in_progress').length,
     completed: issues.filter(i => i.status === 'completed').length,
     rejected: issues.filter(i => i.status === 'rejected').length,
     escalated: issues.filter(i => i.status === 'escalated').length,
@@ -110,7 +110,7 @@ const OfficialDashboard = () => {
   const filterOptions = [
     { value: 'all', label: '📊 All Issues', count: stats.total, color: '#667eea' },
     { value: 'created', label: '📝 Created', count: stats.created, color: '#3498db' },
-    { value: 'in progress', label: '⏳ In Progress', count: stats.inProgress, color: '#f39c12' },
+    { value: 'in_progress', label: '⏳ In_progress', count: stats.inProgress, color: '#f39c12' },
     { value: 'completed', label: '✓ Completed', count: stats.completed, color: '#27ae60' },
     { value: 'rejected', label: '✗ Rejected', count: stats.rejected, color: '#e74c3c' },
     { value: 'escalated', label: '⚠️ Escalated', count: stats.escalated, color: '#e67e22' },
@@ -195,7 +195,7 @@ const OfficialDashboard = () => {
             <div style={{ fontSize: '2.5rem', fontWeight: '700', marginBottom: '0.5rem' }}>
               {stats.inProgress}
             </div>
-            <div style={{ fontSize: '0.95rem', opacity: 0.9, fontWeight: '500' }}>In Progress</div>
+            <div style={{ fontSize: '0.95rem', opacity: 0.9, fontWeight: '500' }}>In_progress</div>
           </div>
 
           <div style={{

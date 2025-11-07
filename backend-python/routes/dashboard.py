@@ -152,7 +152,7 @@ def citizen_statistics():
         statistics = {
             'total': total_issues,
             'created': 0,
-            'in progress': 0,
+            'in_progress': 0,
             'escalated': 0,
             'rejected': 0,
             'completed': 0
@@ -267,7 +267,7 @@ def get_higher_official_issues():
             ORDER BY 
               CASE i.status
                 WHEN 'escalated' THEN 0
-                WHEN 'in progress' THEN 1
+                WHEN 'in_progress' THEN 1
                 WHEN 'created' THEN 2
               END,
               i.created_at DESC'''

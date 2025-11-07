@@ -382,8 +382,8 @@ const IssueDetails = () => {
             </div>
           )}
 
-          {/* Escalation Button - Only for CITIZENS with created/in progress status & not locked */}
-          {['created', 'in progress'].includes(issue.status) && !isLocked && userRole === 'citizen' && (
+          {/* Escalation Button - Only for CITIZENS with created/in_progress status & not locked */}
+          {['created', 'in_progress'].includes(issue.status) && !isLocked && userRole === 'citizen' && (
             <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '2px solid #ddd' }}>
               <button
                 onClick={() => setShowEscalationModal(true)}
